@@ -1,0 +1,18 @@
+{
+  "name": "load",
+  "version": "0.1.0",
+  "description": "Estimates how long the current coding task will take, learns from your history, and shows a live time-remaining countdown.",
+  "author": { "name": "Aaron Levin" },
+  "repository": "https://github.com/awlevin/claude-load",
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "onOverrun": {
+      "type": "string",
+      "title": "When a task runs past its estimate",
+      "description": "re-estimate: ask the model for a new estimate in the background. say-overdue: show that the task is taking longer than expected.",
+      "default": "re-estimate",
+      "options": ["re-estimate", "say-overdue"]
+    }
+  }
+}

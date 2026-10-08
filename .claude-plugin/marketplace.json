@@ -1,0 +1,6 @@
+{
+  "name": "claude-load",
+  "description": "load: live time-remaining estimates for Claude Code tasks.",
+  "owner": { "name": "Aaron Levin" },
+  "plugins": [{ "name": "load", "source": "./" }]
+}

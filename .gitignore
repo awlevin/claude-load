@@ -1,0 +1,6 @@
+# Written by Claude Code on each load.
+.claude-plugin/types/
+# Claude Code's bundled API docs: proprietary, kept local only.
+docs/api-*/
+node_modules/
+.DS_Store
