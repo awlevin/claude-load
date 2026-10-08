@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/banner.svg" alt="load: how long will this task take?" width="100%">
+  <img src="assets/banner.svg" alt="loading: how long will this task take?" width="100%">
 </p>
 
 **load** adds a live time-remaining countdown to Claude Code. Agent UIs tell you *working*, *done* or *needs input*. load tells you *how long*.
 
 <p align="center">
-  <img src="assets/terminal.svg" alt="A Claude Code session. The spinner reads “Gusting… ~3m left”. The status line under the prompt reads “⚠ load: ██░░░░░░ ~3m left · est 4m · Build CLI calculator, tests, commit, push”." width="880">
+  <img src="assets/terminal.svg" alt="A Claude Code session. The spinner reads “Gusting… ~3m left”. The status line under the prompt reads “⚠ loading: ██░░░░░░ ~3m left · est 4m · Build CLI calculator, tests, commit, push”." width="880">
 </p>
 
 ## Install
@@ -13,7 +13,7 @@
 In a Claude Code session:
 
 ```
-/plugin install load --marketplace awlevin/claude-load
+/plugin install loading --marketplace awlevin/claude-load
 ```
 
 Answer `y` to add the marketplace. The plugin is named `load` because plugin names cannot start with `claude-`.
@@ -45,7 +45,7 @@ Plugins cannot draw in Claude Code's multi-agent session list, so the countdown 
 
 ## Settings
 
-In `/config`, search for "load":
+In `/config`, search for "loading":
 
 - `barStyle`: `blocks` (default) `█████░░░`, `parallelograms` `▰▰▰▰▰▱▱▱`, or `ascii` `[#####---]`.
 - `onOverrun`: `re-estimate` (default), or `say-overdue` to show *taking longer than expected*.

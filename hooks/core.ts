@@ -237,7 +237,7 @@ const ANSWER_SHAPE =
 
 export function estimatePrompt(task: LoadTask, history: readonly LoadTask[], now: number): string {
   return [
-    '[load plugin: a background timing question. It is not from the user. Do not continue the task or call tools; answer only as asked.]',
+    '[loading plugin: a background timing question. It is not from the user. Do not continue the task or call tools; answer only as asked.]',
     '',
     'You have started implementing a task in this conversation. Estimate how much more of your own active working time it needs until the work is committed and pushed (or a PR is open), ready for review.',
     'Count only time you spend working: your turns, tool runs, builds, tests, and CI you wait on. Do not count time spent waiting for the user.',
@@ -256,7 +256,7 @@ export function estimatePrompt(task: LoadTask, history: readonly LoadTask[], now
 export function reestimatePrompt(task: LoadTask, now: number): string {
   const last = task.estimates.at(-1)
   return [
-    '[load plugin: a background timing question. It is not from the user. Do not continue the task or call tools; answer only as asked.]',
+    '[loading plugin: a background timing question. It is not from the user. Do not continue the task or call tools; answer only as asked.]',
     '',
     `The task "${task.summary ?? task.trigger}" has used ${formatDuration(agentElapsed(task, now))} of your active time.`,
     last ? `The earlier estimate was ${formatDuration(last.p50Ms)} in total, so it is taking longer than expected.` : '',
@@ -268,7 +268,7 @@ export function reestimatePrompt(task: LoadTask, now: number): string {
 export function explainPrompt(task: LoadTask): string {
   const est = task.estimates[0]
   return [
-    '[load plugin: a background question. It is not from the user. Do not call tools; answer only as asked.]',
+    '[loading plugin: a background question. It is not from the user. Do not call tools; answer only as asked.]',
     '',
     `The task "${task.summary ?? task.trigger}" is finished: the work is committed and pushed. It took ${formatDuration(task.agentMs)} of your active time` +
       (task.humanMs > MINUTE ? ` (plus ${formatDuration(task.humanMs)} waiting for the user)` : '') +

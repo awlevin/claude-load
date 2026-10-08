@@ -1,6 +1,6 @@
 {
-  "name": "load",
-  "version": "0.3.0",
+  "name": "loading",
+  "version": "0.4.0",
   "description": "Estimates how long the current coding task will take, learns from your history, and shows a live time-remaining countdown.",
   "author": {
     "name": "Aaron Levin"

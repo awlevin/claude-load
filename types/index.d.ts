@@ -63,7 +63,7 @@ export type StatsData = {
 
 declare module 'claude-code' {
   interface PluginState {
-    load: {
+    loading: {
       task: LoadTask | null
       /** The text the spinner and status line show; null shows nothing. */
       label: string | null

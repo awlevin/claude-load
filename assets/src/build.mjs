@@ -194,8 +194,8 @@ function band(doc) {
     `<rect width="${W}" height="${H}" fill="${C.ink}"/>`,
     shade({ x0: split, y0: 0, x1: W, y1: H, holes: labels.map(l => l.box) }),
     `<rect width="${split}" height="${H}" fill="${C.amber}"/>`,
-    // Departure Mono is drawn on an 11 px grid: at 154 px, a dot is 14 px.
-    doc.text('load', { x: split / 2, y: 216, size: 154, font: 'pixel', fill: C.ink, anchor: 'middle' }),
+    // Departure Mono is drawn on an 11 px grid: at 88 px, a dot is 8 px.
+    doc.text('loading', { x: split / 2, y: 192, size: 88, font: 'pixel', fill: C.ink, anchor: 'middle' }),
     ...labels.map(l => l.svg),
   ].join('\n')
 }
@@ -210,8 +210,8 @@ function banner() {
     width: W,
     height: H,
     body,
-    title: 'load',
-    desc: 'The word load on the filled part of a progress bar, and the question: how long will this task take?',
+    title: 'loading',
+    desc: 'The word loading on the filled part of a progress bar, and the question: how long will this task take?',
   })
 }
 
@@ -306,7 +306,7 @@ function terminal() {
       const [left, meta] = f.spinner
       parts.push(line([['✽ ', C.claude], [`Gusting… ${left} `, C.claude], [meta, C.dim]], 8))
     }
-    if (f.status) parts.push(line([['⚠ load: ', C.yellow], [f.status, C.text]], 12))
+    if (f.status) parts.push(line([['⚠ loading: ', C.yellow], [f.status, C.text]], 12))
     if (f.toast) parts.push(line([[f.toast, C.text]], 12))
     return `<g class="f f${i}">${parts.join('')}</g>`
   })
@@ -335,7 +335,7 @@ function terminal() {
     body: [...fixed, ...frames].join('\n'),
     title: 'load in a Claude Code session',
     desc:
-      'The spinner reads: Gusting… ~3m left. The status line under the prompt reads: ⚠ load: ██░░░░░░ ~3m left · est 4m · ' +
+      'The spinner reads: Gusting… ~3m left. The status line under the prompt reads: ⚠ loading: ██░░░░░░ ~3m left · est 4m · ' +
       `${TASK}. The countdown pauses while Claude waits for an answer, re-estimates when it runs out, and ends with: Done in 5m (estimated 4m) · 3m waiting on you.`,
   })
 }
@@ -449,15 +449,15 @@ function social() {
     `<rect width="${W}" height="${H}" fill="${C.ink}"/>`,
     band(doc),
     doc.text([['✽ ', C.claude], ['Gusting… ~3m left ', C.claude], ['(33s · ↓ 2.9k tokens)', C.dim]], { x, y: 410, size: 28 }),
-    doc.text([['⚠ load: ', C.yellow], ['██░░░░░░ ~3m left · est 4m', C.text]], { x, y: 466, size: 28 }),
+    doc.text([['⚠ loading: ', C.yellow], ['██░░░░░░ ~3m left · est 4m', C.text]], { x, y: 466, size: 28 }),
     `<rect x="${x}" y="530" width="${W - 2 * x}" height="1" fill="${C.line}"/>`,
-    doc.text('/plugin install load --marketplace awlevin/claude-load', { x, y: 584, size: 22, fill: C.mist }),
+    doc.text('/plugin install loading --marketplace awlevin/claude-load', { x, y: 584, size: 22, fill: C.mist }),
   ].join('\n')
   return doc.svg({
     width: W,
     height: H,
     body,
-    title: 'load: a live countdown for Claude Code',
+    title: 'loading: a live countdown for Claude Code',
     desc: 'The load banner, the spinner and status line with ~3m left, and the install command.',
   })
 }

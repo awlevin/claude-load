@@ -1,6 +1,6 @@
 {
   "name": "claude-load",
-  "description": "load: live time-remaining estimates for Claude Code tasks.",
+  "description": "loading: live time-remaining estimates for Claude Code tasks.",
   "owner": { "name": "Aaron Levin" },
-  "plugins": [{ "name": "load", "source": "./" }]
+  "plugins": [{ "name": "loading", "source": "./" }]
 }

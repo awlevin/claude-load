@@ -35,12 +35,12 @@ import {
 
 type $ = EngineInterface
 
-const task = atom({ plugin: 'load', key: 'task' } as const, null as LoadTask | null)
-const label = atom({ plugin: 'load', key: 'label' } as const, null as string | null)
-const turnStartedAt = atom({ plugin: 'load', key: 'turnStartedAt' } as const, null as number | null)
-const treeBaseline = atom({ plugin: 'load', key: 'treeBaseline' } as const, null as string | null)
-const statsData = atom({ plugin: 'load', key: 'statsData' } as const, null as StatsData | null)
-const agentStarts = atom({ plugin: 'load', key: 'agentStarts' } as const, {} as Record<string, number>)
+const task = atom({ plugin: 'loading', key: 'task' } as const, null as LoadTask | null)
+const label = atom({ plugin: 'loading', key: 'label' } as const, null as string | null)
+const turnStartedAt = atom({ plugin: 'loading', key: 'turnStartedAt' } as const, null as number | null)
+const treeBaseline = atom({ plugin: 'loading', key: 'treeBaseline' } as const, null as string | null)
+const statsData = atom({ plugin: 'loading', key: 'statsData' } as const, null as StatsData | null)
+const agentStarts = atom({ plugin: 'loading', key: 'agentStarts' } as const, {} as Record<string, number>)
 
 /** How often the countdown and the background estimates are checked. */
 const TICK_MS = 2_000
@@ -139,7 +139,7 @@ async function estimate($: $, t: LoadTask): Promise<void> {
     if (answer === null) {
       failures = { taskId: t.id, count: failures.taskId === t.id ? failures.count + 1 : 1 }
       const why = reply.isAnswered ? `unreadable reply: ${reply.text.slice(0, 200)}` : reply.reason
-      $.ui.log(`load: estimate failed (${why})`, { to: 'debug' })
+      $.ui.log(`loading: estimate failed (${why})`, { to: 'debug' })
       return
     }
     // An overrun is evidence against shrinking: re-estimates never scale down.
@@ -307,7 +307,7 @@ async function onShipped($: $, command: string, output: string): Promise<void> {
 }
 
 function debug($: $, where: string, err: unknown): void {
-  $.ui.log(`load: ${where} failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
+  $.ui.log(`loading: ${where} failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
 }
 
 async function refreshStats($: $): Promise<void> {
@@ -318,7 +318,7 @@ async function refreshStats($: $): Promise<void> {
 
 async function openStats($: $): Promise<void> {
   await refreshStats($)
-  await $.ui.open({ id: STATS_PANE, title: 'load · accuracy', focus: true, closeOnEscape: true })
+  await $.ui.open({ id: STATS_PANE, title: 'loading · accuracy', focus: true, closeOnEscape: true })
 }
 
 /** The short text answer of `/load`; `/load stats` has the full picture. */
