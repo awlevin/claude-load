@@ -60,7 +60,7 @@ Each task is one JSON file in `~/.claude/load/tasks/<repo>/`. Set `CLAUDE_LOAD_D
 
 ## Develop
 
-```sh
+```
 claude --plugin-dir .      # load from this folder, with hot reload
 claude plugin validate .
 claude plugin test .
