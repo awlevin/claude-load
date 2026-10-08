@@ -1,0 +1,23 @@
+{
+  "name": "loading-demo-video",
+  "private": true,
+  "description": "The launch video for loading: real Claude Code recordings wrapped in motion graphics.",
+  "type": "module",
+  "scripts": {
+    "snapshots": "node scripts/snapshot.mjs",
+    "studio": "npm run snapshots && remotion studio",
+    "render": "npm run snapshots && remotion render LoadingDemo out/loading-demo.mp4 --codec h264 --pixel-format yuv420p --crf 16 && remotion still LoadingDemo out/poster.png --frame=90 --scale=0.6667",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.534",
+    "@xterm/headless": "6.0.0",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.534"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

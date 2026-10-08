@@ -4,3 +4,8 @@
 docs/api-*/
 node_modules/
 .DS_Store
+
+# The demo video: dependencies and renders.
+video/node_modules/
+video/out/
+video/public/term/
