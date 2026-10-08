@@ -3,6 +3,7 @@ import type { EngineInterface, Register, SessionRepo } from 'claude-code'
 
 import type { LoadTask, StatsData } from '../types'
 import {
+  BAR_STYLES,
   MAX_REESTIMATES,
   TREE_SIGNATURE,
   accuracy,
@@ -28,6 +29,7 @@ import {
   times,
   toEstimate,
   view,
+  type BarStyle,
   type Overrun,
 } from './core'
 
@@ -52,6 +54,7 @@ const MAX_FAILURES = 3
 
 // Module state: a reload starts these over, which is safe.
 let overrun: Overrun = 're-estimate'
+let barStyle: BarStyle = 'blocks'
 let isEstimating = false
 let isTicking = false
 let failures = { taskId: '', count: 0 }
@@ -169,7 +172,7 @@ async function tick($: $): Promise<void> {
     await syncActivity($)
     const t = await read($, task)
     const now = await $.clock.now()
-    let shown = view(t, now, { isEstimating, overrun })
+    let shown = view(t, now, { isEstimating, overrun, barStyle })
     if (t?.status === 'open' && !isEstimating) {
       const hasFailedOut = failures.taskId === t.id && failures.count >= MAX_FAILURES
       const isFirst = t.estimates.length === 0
@@ -177,7 +180,7 @@ async function tick($: $): Promise<void> {
         shown?.isOver === true && overrun === 're-estimate' && t.estimates.length <= MAX_REESTIMATES && t.activeSince !== null
       if (!hasFailedOut && (isFirst || isRe)) {
         void estimate($, t)
-        shown = view(t, now, { isEstimating, overrun })
+        shown = view(t, now, { isEstimating, overrun, barStyle })
       }
     }
     if (shown?.status !== lastStatus) {
@@ -320,7 +323,7 @@ async function openStats($: $): Promise<void> {
 
 /** The short text answer of `/load`; `/load stats` has the full picture. */
 async function report($: $): Promise<string> {
-  const shown = view(await read($, task), await $.clock.now(), { isEstimating, overrun })
+  const shown = view(await read($, task), await $.clock.now(), { isEstimating, overrun, barStyle })
   const lines = [shown ? shown.status : 'No open task. A task opens at the first edit, and closes at a push or PR.']
   const repo = await $.session.repo()
   if (repo !== null) {
@@ -340,6 +343,7 @@ async function report($: $): Promise<string> {
 
 export const register: Register = (on, options) => {
   overrun = options.onOverrun === 'say-overdue' ? 'say-overdue' : 're-estimate'
+  barStyle = BAR_STYLES.find(style => style === options.barStyle) ?? 'blocks'
 
   on('session.start', async ($, e, next) => {
     await $.command.register({

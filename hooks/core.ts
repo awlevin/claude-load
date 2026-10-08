@@ -294,13 +294,27 @@ function about(ms: number): string {
   return text.startsWith('<') ? text : `~${text}`
 }
 
-export function progressBar(fraction: number, width = 8): string {
+export const BAR_STYLES = ['blocks', 'parallelograms', 'ascii'] as const
+export type BarStyle = (typeof BAR_STYLES)[number]
+
+const BAR_GLYPHS: Record<BarStyle, { full: string; empty: string; open: string; close: string; gap: string }> = {
+  blocks: { full: '█', empty: '░', open: '', close: '', gap: ' ' },
+  // Many fonts draw ▰▱ wider than their one cell: a second space keeps the
+  // last glyph off the text after it.
+  parallelograms: { full: '▰', empty: '▱', open: '', close: '', gap: '  ' },
+  ascii: { full: '#', empty: '-', open: '[', close: ']', gap: ' ' },
+}
+
+/** The bar and the gap after it, in the person's chosen style. */
+export function progressBar(fraction: number, style: BarStyle = 'blocks', width = 8): string {
+  const g = BAR_GLYPHS[style]
   const filled = Math.round(Math.min(1, Math.max(0, fraction)) * width)
-  // Block elements: one cell wide in every terminal font, unlike ▰▱.
-  return '█'.repeat(filled) + '░'.repeat(width - filled)
+  return g.open + g.full.repeat(filled) + g.empty.repeat(width - filled) + g.close + g.gap
 }
 
 export type Overrun = 're-estimate' | 'say-overdue'
+
+export type ViewOptions = { isEstimating: boolean; overrun: Overrun; barStyle?: BarStyle }
 
 export type View = {
   /** Short text for the spinner, such as `~8m left`. */
@@ -315,8 +329,9 @@ export type View = {
 export function view(
   task: LoadTask | null,
   now: number,
-  args: { isEstimating: boolean; overrun: Overrun },
+  args: ViewOptions,
 ): View | null {
+  const bar = (fraction: number) => progressBar(fraction, args.barStyle)
   if (task === null || task.status !== 'open') return null
   const name = task.summary ?? task.trigger
   const elapsed = agentElapsed(task, now)
@@ -324,7 +339,7 @@ export function view(
   const last = task.estimates.at(-1)
   if (last === undefined) {
     const text = args.isEstimating ? 'estimating…' : 'no estimate yet'
-    return { spinner: text, status: `${progressBar(0)} ${text} · ${name}`, isOver: false }
+    return { spinner: text, status: `${bar(0)}${text} · ${name}`, isOver: false }
   }
   const left = last.p50Ms - elapsed
   const isOver = left <= 0
@@ -333,15 +348,14 @@ export function view(
     const text = args.isEstimating && canReestimate ? 're-estimating…' : 'taking longer than expected'
     return {
       spinner: text,
-      status: `${progressBar(1)} ${text} · ${formatDuration(elapsed)} so far${paused} · ${name}`,
+      status: `${bar(1)}${text} · ${formatDuration(elapsed)} so far${paused} · ${name}`,
       isOver,
     }
   }
-  const bar = progressBar(elapsed / last.p50Ms)
   const remaining = about(left)
   return {
     spinner: `${remaining} left`,
-    status: `${bar} ${remaining} left · est ${formatDuration(last.p50Ms)}${paused} · ${name}`,
+    status: `${bar(elapsed / last.p50Ms)}${remaining} left · est ${formatDuration(last.p50Ms)}${paused} · ${name}`,
     isOver,
   }
 }

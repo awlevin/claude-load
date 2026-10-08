@@ -1,8 +1,10 @@
 {
   "name": "load",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Estimates how long the current coding task will take, learns from your history, and shows a live time-remaining countdown.",
-  "author": { "name": "Aaron Levin" },
+  "author": {
+    "name": "Aaron Levin"
+  },
   "repository": "https://github.com/awlevin/claude-load",
   "license": "MIT",
   "types": "./types/index.d.ts",
@@ -12,7 +14,21 @@
       "title": "When a task runs past its estimate",
       "description": "re-estimate: ask the model for a new estimate in the background. say-overdue: show that the task is taking longer than expected.",
       "default": "re-estimate",
-      "options": ["re-estimate", "say-overdue"]
+      "options": [
+        "re-estimate",
+        "say-overdue"
+      ]
+    },
+    "barStyle": {
+      "type": "string",
+      "title": "Progress bar style",
+      "description": "blocks: █████░░░ (works in every font). parallelograms: ▰▰▰▰▰▱▱▱. ascii: [#####---].",
+      "default": "blocks",
+      "options": [
+        "blocks",
+        "parallelograms",
+        "ascii"
+      ]
     }
   }
 }

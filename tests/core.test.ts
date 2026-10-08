@@ -142,8 +142,11 @@ describe('estimates', () => {
 })
 
 describe('display', () => {
-  test('the bar is one cell per step', () => {
-    expect(progressBar(0.5)).toBe('████░░░░')
+  test('bar styles', () => {
+    expect(progressBar(0.5)).toBe('████░░░░ ')
+    expect(progressBar(0.5, 'parallelograms')).toBe('▰▰▰▰▱▱▱▱  ')
+    expect(progressBar(0.5, 'ascii')).toBe('[####----] ')
+    expect(progressBar(2, 'ascii')).toBe('[########] ')
   })
 
   test('durations', () => {
