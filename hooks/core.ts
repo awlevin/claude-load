@@ -114,15 +114,15 @@ export function newTask(args: {
   }
 }
 
-/** A main-loop turn began: any wait for the person ends. */
-export function turnStarted(task: LoadTask, now: number): LoadTask {
+/** The agent began working (a turn, or a background agent): any wait for the person ends. */
+export function markActive(task: LoadTask, now: number): LoadTask {
   if (task.activeSince !== null) return task
   const waited = task.idleSince === null ? 0 : Math.max(0, now - task.idleSince)
   return { ...task, humanMs: task.humanMs + waited, idleSince: null, activeSince: now }
 }
 
-/** A main-loop turn ended: active time folds in, the wait for the person begins. */
-export function turnEnded(task: LoadTask, now: number): LoadTask {
+/** Nothing is working any more: active time folds in, the wait for the person begins. */
+export function markIdle(task: LoadTask, now: number): LoadTask {
   if (task.activeSince === null) return task
   const worked = Math.max(0, now - task.activeSince)
   return { ...task, agentMs: task.agentMs + worked, activeSince: null, idleSince: now }
@@ -140,7 +140,7 @@ export function closeTask(
   status: 'done' | 'abandoned',
   end: LoadTask['end'],
 ): LoadTask {
-  const folded = turnEnded(turnStarted(task, now), now)
+  const folded = markIdle(markActive(task, now), now)
   return { ...folded, idleSince: null, status, endedAt: now, end }
 }
 
@@ -296,7 +296,8 @@ function about(ms: number): string {
 
 export function progressBar(fraction: number, width = 8): string {
   const filled = Math.round(Math.min(1, Math.max(0, fraction)) * width)
-  return '▰'.repeat(filled) + '▱'.repeat(width - filled)
+  // Block elements: one cell wide in every terminal font, unlike ▰▱.
+  return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
 export type Overrun = 're-estimate' | 'say-overdue'
@@ -359,30 +360,222 @@ export type Accuracy = {
   withinP90: number | null
 }
 
+type Errors = { model: number[]; baseline: number[]; inP50: number; inP90: number }
+
+/** Each done task's log error, and the baseline's, for one repo's history. */
+function errors(history: readonly LoadTask[]): Errors {
+  const done = doneWithEstimate(history).reverse() // oldest first
+  const out: Errors = { model: [], baseline: [], inP50: 0, inP90: 0 }
+  done.forEach((t, i) => {
+    const est = t.estimates[0]!
+    out.model.push(Math.abs(Math.log(t.agentMs / est.p50Ms)))
+    if (t.agentMs <= est.p50Ms) out.inP50 += 1
+    if (t.agentMs <= est.p90Ms) out.inP90 += 1
+    const earlier = done.slice(0, i).map(e => e.agentMs)
+    if (earlier.length >= 3) out.baseline.push(Math.abs(Math.log(t.agentMs / median(earlier))))
+  })
+  return out
+}
+
+function summarize(e: Errors): Accuracy {
+  const n = e.model.length
+  return {
+    n,
+    modelError: n > 0 ? Math.exp(median(e.model)) : null,
+    baselineError: e.baseline.length > 0 ? Math.exp(median(e.baseline)) : null,
+    withinP50: n > 0 ? e.inP50 / n : null,
+    withinP90: n > 0 ? e.inP90 / n : null,
+  }
+}
+
 /**
  * Whether the estimates beat the simplest baseline: guessing the median of
  * the repo's earlier tasks. If they do not, the plugin is not worth shipping.
  */
 export function accuracy(history: readonly LoadTask[]): Accuracy {
-  const done = doneWithEstimate(history).reverse() // oldest first
-  const model: number[] = []
-  const baseline: number[] = []
-  let inP50 = 0
-  let inP90 = 0
-  done.forEach((t, i) => {
-    const est = t.estimates[0]!
-    model.push(Math.abs(Math.log(t.agentMs / est.p50Ms)))
-    if (t.agentMs <= est.p50Ms) inP50 += 1
-    if (t.agentMs <= est.p90Ms) inP90 += 1
-    const earlier = done.slice(0, i).map(e => e.agentMs)
-    if (earlier.length >= 3) baseline.push(Math.abs(Math.log(t.agentMs / median(earlier))))
+  return summarize(errors(history))
+}
+
+/** Accuracy over several repos, each task judged against its own repo's baseline. */
+export function overallAccuracy(histories: readonly (readonly LoadTask[])[]): Accuracy {
+  const all = histories.map(errors)
+  return summarize({
+    model: all.flatMap(e => e.model),
+    baseline: all.flatMap(e => e.baseline),
+    inP50: all.reduce((sum, e) => sum + e.inP50, 0),
+    inP90: all.reduce((sum, e) => sum + e.inP90, 0),
   })
-  const n = done.length
-  return {
-    n,
-    modelError: n > 0 ? Math.exp(median(model)) : null,
-    baselineError: baseline.length > 0 ? Math.exp(median(baseline)) : null,
-    withinP50: n > 0 ? inP50 / n : null,
-    withinP90: n > 0 ? inP90 / n : null,
+}
+
+// ---- Stats pane ------------------------------------------------------------
+
+export const pct = (x: number | null) => (x === null ? '–' : `${Math.round(x * 100)}%`)
+export const times = (x: number | null) => (x === null ? '–' : `×${x.toFixed(1)}`)
+
+/** `awlevin/website` for `github.com/awlevin/website`. */
+function shortRepo(repo: string): string {
+  return repo.split('/').slice(-2).join('/')
+}
+
+export function ago(ms: number): string {
+  const minutes = Math.round(ms / MINUTE)
+  if (minutes < 60) return `${Math.max(0, minutes)}m ago`
+  const hours = Math.round(minutes / 60)
+  return hours < 48 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`
+}
+
+/** How a finished task compared with its first estimate. */
+export function verdict(t: LoadTask): string {
+  const est = t.estimates[0]
+  if (est === undefined) return 'no estimate'
+  const ratio = t.agentMs / est.p50Ms
+  const mark = t.agentMs <= est.p50Ms ? '✓' : t.agentMs <= est.p90Ms ? '~' : '✗'
+  if (ratio >= 0.95 && ratio <= 1.05) return `${mark} on target`
+  return ratio > 1 ? `${mark} ${ratio.toFixed(1)}× slower` : `${mark} ${(1 / ratio).toFixed(1)}× faster`
+}
+
+function cell(text: string): string {
+  return text.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+}
+
+function clip(text: string, width: number): string {
+  return text.length <= width ? text : text.slice(0, Math.max(1, width - 1)) + '…'
+}
+
+type Column = { header: string; cells: string[]; isFlex?: boolean; isOptional?: boolean }
+
+/**
+ * A markdown table that fits `width` terminal columns as the surface draws it
+ * (each column its widest cell plus 3, plus 1): optional columns drop first,
+ * then the flex column's cells are clipped.
+ */
+function table(columns: Column[], width: number): string[] {
+  const drawn = (cols: Column[]) =>
+    cols.reduce((sum, c) => sum + Math.max(c.header.length, ...c.cells.map(x => x.length)) + 3, 1)
+  let cols = columns
+  const flexRoom = (cs: Column[]) => {
+    const flex = cs.find(c => c.isFlex)
+    return flex ? width - (drawn(cs.filter(c => c !== flex)) + 3) : Infinity
   }
+  if (drawn(cols) > width && flexRoom(cols) < 24) cols = cols.filter(c => !c.isOptional)
+  const room = flexRoom(cols)
+  cols = cols.map(c => (c.isFlex ? { ...c, cells: c.cells.map(x => clip(x, Math.max(8, room))) } : c))
+  const rows = cols[0]!.cells.map((_, i) => `| ${cols.map(c => cell(c.cells[i]!)).join(' | ')} |`)
+  return [`| ${cols.map(c => c.header).join(' | ')} |`, `|${cols.map(() => '---').join('|')}|`, ...rows]
+}
+
+/**
+ * The stats pane as markdown, fitted to `width` columns: overall and per-repo
+ * accuracy, the open task in this session with its clocks and every estimate,
+ * and the finished tasks.
+ */
+export function statsMarkdown(
+  histories: ReadonlyMap<string, readonly LoadTask[]>,
+  current: LoadTask | null,
+  now: number,
+  width = 120,
+): string {
+  const lists = [...histories.values()]
+  const all = lists.flat()
+  const count = (status: LoadTask['status']) => all.filter(t => t.status === status).length
+  const overall = overallAccuracy(lists)
+  const out: string[] = []
+
+  out.push(
+    '## Overall',
+    '',
+    `**${count('done')}** done · **${count('open')}** open · **${count('abandoned')}** dropped`,
+    '',
+    `- Off by **${times(overall.modelError)}** (median of actual ÷ estimate, either way; ×1.0 is perfect)`,
+    `- Repo-median baseline: **${times(overall.baselineError)}**` +
+      (overall.baselineError === null ? ' (needs 4+ finished tasks in a repo)' : ''),
+    `- Within p50: **${pct(overall.withinP50)}** (target ~50%) · within p90: **${pct(overall.withinP90)}** (target ~90%)`,
+  )
+  if (overall.n > 0 && overall.baselineError !== null) {
+    out.push(
+      '',
+      overall.modelError! < overall.baselineError
+        ? '_Estimates beat the baseline._'
+        : '_Estimates do not beat the baseline yet._',
+    )
+  }
+
+  const repos = [...histories.entries()].sort((a, b) => b[1].length - a[1].length)
+  const repoStats = repos.map(([repo, history]) => ({ repo, history, a: accuracy(history) }))
+  out.push('', '## By repo', '')
+  if (repoStats.length === 0) out.push('_No tasks yet._')
+  else out.push(
+    ...table(
+      [
+        { header: 'Repo', cells: repoStats.map(r => shortRepo(r.repo)), isFlex: true },
+        { header: 'Done', cells: repoStats.map(r => String(r.history.filter(t => t.status === 'done').length)) },
+        { header: 'Off by', cells: repoStats.map(r => times(r.a.modelError)) },
+        { header: 'Baseline', cells: repoStats.map(r => times(r.a.baselineError)), isOptional: true },
+        { header: '≤p50', cells: repoStats.map(r => pct(r.a.withinP50)) },
+        { header: '≤p90', cells: repoStats.map(r => pct(r.a.withinP90)) },
+        { header: 'Calib.', cells: repoStats.map(r => `×${calibrationFactor(r.history).toFixed(2)}`), isOptional: true },
+      ],
+      width,
+    ),
+  )
+
+  if (current !== null && current.status === 'open') {
+    out.push(
+      '',
+      '## Open in this session',
+      '',
+      `**${cell(current.summary ?? current.trigger)}** · ${shortRepo(current.repo)} · opened by \`${cell(current.trigger)}\` ${ago(now - current.startedAt)}`,
+      '',
+      `Agent ${formatDuration(agentElapsed(current, now))} · waiting on you ${formatDuration(current.humanMs + (current.idleSince === null ? 0 : now - current.idleSince))} · ${current.activeSince === null ? 'paused' : 'working'}`,
+    )
+    if (current.estimates.length > 0) {
+      const es = current.estimates
+      out.push(
+        '',
+        ...table(
+          [
+            { header: 'Asked at', cells: es.map(e => `${formatDuration(e.agentMsAtAsk)} in`) },
+            { header: 'p50 total', cells: es.map(e => formatDuration(e.p50Ms)) },
+            { header: 'p90 total', cells: es.map(e => formatDuration(e.p90Ms)) },
+            { header: 'Calib.', cells: es.map(e => `×${e.factor.toFixed(2)}`) },
+          ],
+          width,
+        ),
+      )
+    }
+  }
+
+  const finished = all
+    .filter(t => t.status === 'done')
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+    .slice(0, 50)
+  out.push('', '## Finished tasks', '')
+  if (finished.length === 0) {
+    out.push('_None yet. A task closes at a push or `gh pr create`._')
+  } else {
+    out.push(
+      ...table(
+        [
+          { header: 'When', cells: finished.map(t => ago(now - (t.endedAt ?? now))) },
+          { header: 'Repo', cells: finished.map(t => shortRepo(t.repo)), isOptional: true },
+          { header: 'Task', cells: finished.map(t => t.summary ?? t.trigger), isFlex: true },
+          { header: 'Est.', cells: finished.map(t => (t.estimates[0] ? formatDuration(t.estimates[0].p50Ms) : '–')) },
+          { header: 'Actual', cells: finished.map(t => formatDuration(t.agentMs)) },
+          { header: 'Result', cells: finished.map(verdict) },
+          { header: 'Waited', cells: finished.map(t => formatDuration(t.humanMs)), isOptional: true },
+        ],
+        width,
+      ),
+    )
+    const explained = finished.filter(t => t.explanation).slice(0, 10)
+    if (explained.length > 0) {
+      out.push('', '### Why', '')
+      for (const t of explained) {
+        const name = cell(t.summary ?? t.trigger)
+        const link = t.end?.prUrl ? ` ([PR](${t.end.prUrl}))` : ''
+        out.push(`- **${name}**${link} · ${verdict(t)}: ${cell(t.explanation!)}`)
+      }
+    }
+  }
+  return out.join('\n')
 }

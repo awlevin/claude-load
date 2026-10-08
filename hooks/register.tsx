@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionRepo } from 'claude-code'
 
-import type { LoadTask } from '../types'
+import type { LoadTask, StatsData } from '../types'
 import {
   MAX_REESTIMATES,
   TREE_SIGNATURE,
@@ -10,20 +10,23 @@ import {
   calibrationFactor,
   closeTask,
   editTrigger,
-  isEditTool,
   estimatePrompt,
   explainPrompt,
   findPrUrl,
   formatDuration,
+  isEditTool,
+  markActive,
+  markIdle,
   newTask,
   normalizeRemote,
   parseEstimate,
+  pct,
   reestimatePrompt,
   repoSlug,
   shipKind,
+  statsMarkdown,
+  times,
   toEstimate,
-  turnEnded,
-  turnStarted,
   view,
   type Overrun,
 } from './core'
@@ -34,11 +37,16 @@ const task = atom({ plugin: 'load', key: 'task' } as const, null as LoadTask | n
 const label = atom({ plugin: 'load', key: 'label' } as const, null as string | null)
 const turnStartedAt = atom({ plugin: 'load', key: 'turnStartedAt' } as const, null as number | null)
 const treeBaseline = atom({ plugin: 'load', key: 'treeBaseline' } as const, null as string | null)
+const statsData = atom({ plugin: 'load', key: 'statsData' } as const, null as StatsData | null)
+const agentStarts = atom({ plugin: 'load', key: 'agentStarts' } as const, {} as Record<string, number>)
 
 /** How often the countdown and the background estimates are checked. */
 const TICK_MS = 2_000
 /** A `gh pr create` this soon after a push adds its URL to the closed task. */
 const PR_GRACE_MS = 15 * 60_000
+const STATS_PANE = 'load-stats'
+/** Agent spawn times kept, newest first. */
+const MAX_AGENT_STARTS = 100
 /** Failed estimates allowed per task before it stops asking. */
 const MAX_FAILURES = 3
 
@@ -54,9 +62,13 @@ let toExplain: LoadTask | null = null
 
 // ---- Storage: one JSON file per task under ~/.claude/load/tasks/<repo>/ --
 
-async function tasksDir($: $, repo: string): Promise<string> {
+async function tasksRoot($: $): Promise<string> {
   const base = (await $.env.get('CLAUDE_LOAD_DIR')) ?? `${await $.env.get('HOME')}/.claude/load`
-  return `${base}/tasks/${repoSlug(repo)}`
+  return `${base}/tasks`
+}
+
+async function tasksDir($: $, repo: string): Promise<string> {
+  return `${await tasksRoot($)}/${repoSlug(repo)}`
 }
 
 async function save($: $, t: LoadTask): Promise<void> {
@@ -64,7 +76,24 @@ async function save($: $, t: LoadTask): Promise<void> {
 }
 
 async function loadHistory($: $, repo: string): Promise<LoadTask[]> {
-  const dir = await tasksDir($, repo)
+  return loadDir($, await tasksDir($, repo))
+}
+
+/** Every repo's history, keyed by repo. */
+async function loadAll($: $): Promise<Map<string, LoadTask[]>> {
+  const root = await tasksRoot($)
+  const dirs = (await $.fs.list(root).catch(() => [])).filter(d => d.kind === 'dir')
+  const lists = await Promise.all(dirs.map(d => loadDir($, `${root}/${d.name}`)))
+  const byRepo = new Map<string, LoadTask[]>()
+  for (const t of lists.flat()) {
+    const list = byRepo.get(t.repo)
+    if (list) list.push(t)
+    else byRepo.set(t.repo, [t])
+  }
+  return byRepo
+}
+
+async function loadDir($: $, dir: string): Promise<LoadTask[]> {
   const entries = await $.fs.list(dir).catch(() => [])
   const files = entries
     .filter(f => f.kind === 'file' && f.name.endsWith('.json'))
@@ -137,6 +166,7 @@ async function tick($: $): Promise<void> {
   if (isTicking) return
   isTicking = true
   try {
+    await syncActivity($)
     const t = await read($, task)
     const now = await $.clock.now()
     let shown = view(t, now, { isEstimating, overrun })
@@ -173,7 +203,16 @@ async function finish($: $, status: 'done' | 'abandoned', end: LoadTask['end']):
   return closed
 }
 
-async function openTask($: $, trigger: string, repo: SessionRepo): Promise<void> {
+/**
+ * When the work behind a tool call began: the spawn of the subagent that made
+ * it, else the start of the main turn, else now.
+ */
+async function workStart($: $, agentId: string | undefined, now: number): Promise<number> {
+  const spawned = agentId === undefined ? undefined : (await read($, agentStarts))[agentId]
+  return spawned ?? (await read($, turnStartedAt)) ?? now
+}
+
+async function openTask($: $, trigger: string, repo: SessionRepo, agentId: string | undefined): Promise<void> {
   const now = await $.clock.now()
   const sessionId = await $.session.id()
   const opened = newTask({
@@ -182,19 +221,19 @@ async function openTask($: $, trigger: string, repo: SessionRepo): Promise<void>
     repo: normalizeRemote(repo.remote, repo.root),
     model: await $.session.model(),
     trigger,
-    // The turn the work showed up in is implementation from its start.
-    startedAt: (await read($, turnStartedAt)) ?? now,
+    startedAt: await workStart($, agentId, now),
   })
   await update($, task, () => opened)
   await save($, opened)
+  await syncActivity($)
   void tick($)
 }
 
-async function openIfEdit($: $, tool: string, input: Record<string, unknown>): Promise<void> {
+async function openIfEdit($: $, tool: string, input: Record<string, unknown>, agentId: string | undefined): Promise<void> {
   if ((await read($, task))?.status === 'open') return
   const repo = await $.session.repo()
   const trigger = repo && editTrigger(tool, input, repo.root)
-  if (repo && trigger) await openTask($, trigger, repo)
+  if (repo && trigger) await openTask($, trigger, repo, agentId)
 }
 
 /** The working tree's signature, or null outside a repo. */
@@ -210,14 +249,29 @@ async function recordBaseline($: $): Promise<void> {
   await update($, treeBaseline, () => signature)
 }
 
-/** Opens a task when a shell call changed the tree since the turn began. */
-async function openIfTreeChanged($: $): Promise<void> {
+/** Opens a task when a shell call changed the tree since the baseline. */
+async function openIfTreeChanged($: $, agentId: string | undefined): Promise<void> {
   if ((await read($, task))?.status === 'open') return
   const before = await read($, treeBaseline)
   const repo = await $.session.repo()
   if (before === null || repo === null) return
   const after = await treeSignature($, repo.root)
-  if (after !== null && after !== before) await openTask($, 'shell edit', repo)
+  if (after !== null && after !== before) await openTask($, 'shell edit', repo, agentId)
+}
+
+/**
+ * The agent is working while the main turn runs or any of the session's
+ * agents runs (background delegation); otherwise the time is the person's.
+ */
+async function syncActivity($: $): Promise<void> {
+  const t = await read($, task)
+  if (t?.status !== 'open') return
+  const isTurnRunning = (await read($, turnStartedAt)) !== null
+  const isBusy =
+    isTurnRunning || (await $.agent.list()).some(a => a.status === 'running' || a.status === 'pending')
+  if (isBusy === (t.activeSince !== null)) return
+  const now = await $.clock.now()
+  await change($, cur => (isBusy ? markActive(cur, now) : markIdle(cur, now)))
 }
 
 async function onShipped($: $, command: string, output: string): Promise<void> {
@@ -226,6 +280,8 @@ async function onShipped($: $, command: string, output: string): Promise<void> {
   const prUrl = findPrUrl(output)
   const closed = await finish($, 'done', { kind, prUrl, command: command.slice(0, 200) })
   if (closed !== null) {
+    // The commit just pushed is not new work: compare later calls with now.
+    await recordBaseline($)
     const est = closed.estimates[0]
     $.ui.toast(
       `Done in ${formatDuration(closed.agentMs)}` +
@@ -249,39 +305,34 @@ function debug($: $, where: string, err: unknown): void {
   $.ui.log(`load: ${where} failed: ${err instanceof Error ? err.message : String(err)}`, { to: 'debug' })
 }
 
+async function refreshStats($: $): Promise<void> {
+  const histories = Object.fromEntries(await loadAll($))
+  const at = await $.clock.now()
+  await update($, statsData, () => ({ histories, at }))
+}
+
+async function openStats($: $): Promise<void> {
+  await refreshStats($)
+  await $.ui.open({ id: STATS_PANE, title: 'load · accuracy', focus: true, closeOnEscape: true })
+}
+
+/** The short text answer of `/load`; `/load stats` has the full picture. */
 async function report($: $): Promise<string> {
-  const t = await read($, task)
-  const now = await $.clock.now()
-  const shown = view(t, now, { isEstimating, overrun })
-  const lines: string[] = [shown ? shown.status : 'No open task. A task opens at the first edit or commit, and closes at a push or PR.']
+  const shown = view(await read($, task), await $.clock.now(), { isEstimating, overrun })
+  const lines = [shown ? shown.status : 'No open task. A task opens at the first edit, and closes at a push or PR.']
   const repo = await $.session.repo()
   if (repo !== null) {
     const key = normalizeRemote(repo.remote, repo.root)
-    const history = await loadHistory($, key)
-    const a = accuracy(history)
-    const pct = (x: number | null) => `${Math.round((x ?? 0) * 100)}%`
-    const times = (x: number | null) => `×${(x ?? 1).toFixed(1)}`
+    const a = accuracy(await loadHistory($, key))
     lines.push(
-      '',
-      `${key}: ${history.filter(h => h.status === 'done').length} done, ${history.filter(h => h.status === 'abandoned').length} abandoned`,
       a.n === 0
-        ? 'No estimated tasks finished yet.'
-        : `Estimates were off by ${times(a.modelError)} (median)` +
-            (a.baselineError === null ? '' : `; guessing the repo median was off by ${times(a.baselineError)}`) +
+        ? `${key}: no estimated task has finished yet.`
+        : `${key}: estimates off by ${times(a.modelError)}` +
+            (a.baselineError === null ? '' : ` vs ${times(a.baselineError)} for the repo-median baseline`) +
             ` · ${pct(a.withinP50)} within p50 · ${pct(a.withinP90)} within p90 · n=${a.n}`,
     )
-    const recent = history
-      .filter(h => h.status === 'done')
-      .sort((x, y) => (y.endedAt ?? 0) - (x.endedAt ?? 0))
-      .slice(0, 5)
-    if (recent.length > 0) lines.push('', 'Recent:')
-    for (const h of recent) {
-      const est = h.estimates[0] ? ` (est ${formatDuration(h.estimates[0].p50Ms)})` : ''
-      lines.push(`  ${formatDuration(h.agentMs)}${est} · ${h.summary ?? h.trigger}`)
-      if (h.explanation) lines.push(`    ${h.explanation}`)
-    }
-    lines.push('', `Records: ${await tasksDir($, key)}`)
   }
+  lines.push('/load stats opens the full stats pane.')
   return lines.join('\n')
 }
 
@@ -292,7 +343,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'load',
       description: 'Show the task estimate and how accurate past estimates were',
-      argumentHint: '[done|drop]',
+      argumentHint: '[stats|done|drop]',
     })
     $.clock.every(TICK_MS, () => void tick($))
     void tick($)
@@ -302,12 +353,12 @@ export const register: Register = (on, options) => {
   // An observer, never a gate: any failure here leaves the tool call alone.
   on('tool.call', async ($, e, next) => {
     const input = e as unknown as Record<string, unknown>
-    if (isEditTool(e.tool)) await openIfEdit($, e.tool, input).catch(err => debug($, 'open', err))
+    if (isEditTool(e.tool)) await openIfEdit($, e.tool, input, e.agentId).catch(err => debug($, 'open', err))
     const ran = await next(e)
     if (e.tool === 'Bash') {
       // First the tree, so one command that edits, commits and pushes opens
       // the task before the push closes it.
-      await openIfTreeChanged($).catch(err => debug($, 'tree', err))
+      await openIfTreeChanged($, e.agentId).catch(err => debug($, 'tree', err))
       if (ran.deny === undefined && ran.isError !== true && shipKind(e.command) !== null) {
         await onShipped($, e.command, String(ran.text ?? '')).catch(err => debug($, 'ship', err))
       }
@@ -318,8 +369,7 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     const now = await $.clock.now()
     await update($, turnStartedAt, () => now)
-    const t = await read($, task)
-    if (t?.status === 'open') await change($, cur => turnStarted(cur, now))
+    if ((await read($, task))?.status === 'open') await syncActivity($)
     // Off the turn's path: the model streams for seconds before any tool runs.
     else void recordBaseline($).catch(err => debug($, 'baseline', err))
     return next(e)
@@ -327,10 +377,8 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
-      const now = await $.clock.now()
-      const t = await read($, task)
-      if (t?.status === 'open') await change($, cur => turnEnded(cur, now))
       await update($, turnStartedAt, () => null)
+      await syncActivity($)
       if (toExplain !== null) void explain($, toExplain)
       toExplain = null
       void tick($)
@@ -338,9 +386,37 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Spawn times, so a task a background agent opens starts with that agent.
+  on('agent.spawn', async ($, e, next) => {
+    const now = await $.clock.now()
+    const spawned = await next(e)
+    const id = spawned.agentId
+    if (id !== undefined) {
+      await update($, agentStarts, starts =>
+        Object.fromEntries([[id, now] as const, ...Object.entries(starts)].slice(0, MAX_AGENT_STARTS)),
+      ).catch(err => debug($, 'spawn', err))
+    }
+    return spawned
+  })
+
   on('session.end', async ($, e, next) => {
     await finish($, 'abandoned', null)
     return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
+    const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+    const data = await read($, statsData)
+    const current = await read($, task)
+    const text = data && statsMarkdown(new Map(Object.entries(data.histories)), current, data.at, e.props.bodyColumns)
+    return (
+      <Box flexDirection="column">
+        {text ? <Markdown text={text} /> : <Text dimColor>Loading…</Text>}
+        <Box marginTop={1}>
+          <Button key="refresh" label="Refresh" hotkey="r" onPress={() => refreshStats($)} />
+        </Box>
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
@@ -351,6 +427,10 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'load' }, async ($, e) => {
     const arg = e.args.trim()
+    if (arg === 'stats') {
+      await openStats($)
+      return { text: 'Opened load stats. Esc closes it.' }
+    }
     if (arg === 'done') {
       const closed = await finish($, 'done', { kind: 'manual', prUrl: null, command: '/load done' })
       if (closed === null) return { text: 'No open task.' }

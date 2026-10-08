@@ -54,6 +54,13 @@ export type LoadTask = {
   explanation: string | null
 }
 
+/** Every repo's records, as the stats pane loaded them. */
+export type StatsData = {
+  histories: Record<string, LoadTask[]>
+  /** When they were loaded. */
+  at: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     load: {
@@ -64,6 +71,10 @@ declare module 'claude-code' {
       turnStartedAt: number | null
       /** The working tree's signature when the turn began, to spot shell edits. */
       treeBaseline: string | null
+      /** When each agent of the session was spawned, by agent id. */
+      agentStarts: Record<string, number>
+      /** What the stats pane draws, loaded when it opens or refreshes. */
+      statsData: StatsData | null
     }
   }
 }
