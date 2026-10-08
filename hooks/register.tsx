@@ -205,11 +205,13 @@ async function finish($: $, status: 'done' | 'abandoned', end: LoadTask['end']):
 
 /**
  * When the work behind a tool call began: the spawn of the subagent that made
- * it, else the start of the main turn, else now.
+ * it, else the start of the main turn, else now; never before the previous
+ * task ended, so two tasks in one turn do not overlap.
  */
 async function workStart($: $, agentId: string | undefined, now: number): Promise<number> {
   const spawned = agentId === undefined ? undefined : (await read($, agentStarts))[agentId]
-  return spawned ?? (await read($, turnStartedAt)) ?? now
+  const start = spawned ?? (await read($, turnStartedAt)) ?? now
+  return Math.max(start, (await read($, task))?.endedAt ?? 0)
 }
 
 async function openTask($: $, trigger: string, repo: SessionRepo, agentId: string | undefined): Promise<void> {

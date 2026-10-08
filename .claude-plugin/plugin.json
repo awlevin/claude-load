@@ -1,6 +1,6 @@
 {
   "name": "load",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Estimates how long the current coding task will take, learns from your history, and shows a live time-remaining countdown.",
   "author": { "name": "Aaron Levin" },
   "repository": "https://github.com/awlevin/claude-load",
